@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
 const AuthPage = () => {
+  const navigate = useNavigate();
   const [mode, setMode] = useState('login'); // 'login' or 'register'
   const [role, setRole] = useState('User'); // 'User', 'Police', or 'DC'
   const [formData, setFormData] = useState({
@@ -18,6 +20,14 @@ const AuthPage = () => {
   const [upazilas, setUpazilas] = useState([]);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [loading, setLoading] = useState(false);
+
+  // Check if user is already logged in
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      navigate('/feed');
+    }
+  }, [navigate]);
 
   const portals = [
     { value: 'User', label: 'User Portal', color: 'bg-blue-500' },
@@ -91,11 +101,10 @@ const AuthPage = () => {
           localStorage.setItem('token', response.data.token);
           localStorage.setItem('user', JSON.stringify(response.data.user));
           
-          // Redirect based on role after 2 seconds
+          // Redirect to feed after successful login
           setTimeout(() => {
-            // You can implement role-based redirects here
-            window.location.href = `/${role.toLowerCase()}-dashboard`;
-          }, 2000);
+            navigate('/feed');
+          }, 1500);
         } else {
           // Clear form after registration
           setFormData({ 

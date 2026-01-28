@@ -220,6 +220,7 @@ exports.verifyEmail = async (req, res) => {
       role: pendingUser.role,
       district: pendingUser.district,
       upazila: pendingUser.upazila,
+      residentialArea: pendingUser.upazila, // Set residentialArea to upazila for voting restrictions
       isVerified: true
     });
 
@@ -284,6 +285,12 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Auto-set residentialArea if not set (migration for existing users)
+    if (!user.residentialArea && user.upazila) {
+      user.residentialArea = user.upazila;
+      await user.save();
+    }
+
     // Generate JWT token
     const token = jwt.sign(
       { 
@@ -300,9 +307,19 @@ exports.login = async (req, res) => {
       message: 'Login successful',
       token,
       user: {
+        _id: user._id,
         id: user._id,
+        fullName: user.fullName,
         email: user.email,
-        role: user.role
+        phoneNumber: user.phoneNumber,
+        address: user.address,
+        district: user.district,
+        upazila: user.upazila,
+        nidNumber: user.nidNumber,
+        role: user.role,
+        residentialArea: user.residentialArea,
+        profilePicture: user.profilePicture,
+        reputation: user.reputation
       }
     });
 
@@ -315,3 +332,157 @@ exports.login = async (req, res) => {
     });
   }
 };
+
+// Get current user profile
+exports.getCurrentUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Auto-set residentialArea if not set (migration for existing users)
+    if (!user.residentialArea && user.upazila) {
+      user.residentialArea = user.upazila;
+      await user.save();
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        address: user.address,
+        district: user.district,
+        upazila: user.upazila,
+        nidNumber: user.nidNumber,
+        role: user.role,
+        residentialArea: user.residentialArea,
+        profilePicture: user.profilePicture,
+        reputation: user.reputation
+      }
+    });
+
+  } catch (error) {
+    console.error('Get current user error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error fetching user profile',
+      error: error.message 
+    });
+  }
+};
+
+// Update user profile
+exports.updateProfile = async (req, res) => {
+  try {
+    const { fullName, phoneNumber, address, residentialArea } = req.body;
+    const userId = req.user.id;
+
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Update fields
+    if (fullName) user.fullName = fullName;
+    if (phoneNumber) user.phoneNumber = phoneNumber;
+    if (address) user.address = address;
+    if (residentialArea) user.residentialArea = residentialArea;
+
+    await user.save();
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Profile updated successfully',
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        address: user.address,
+        district: user.district,
+        upazila: user.upazila,
+        nidNumber: user.nidNumber,
+        role: user.role,
+        residentialArea: user.residentialArea,
+        profilePicture: user.profilePicture
+      }
+    });
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error updating profile',
+      error: error.message 
+    });
+  }
+};
+
+// Upload profile picture
+exports.uploadProfilePicture = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Check if image was uploaded
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload an image'
+      });
+    }
+
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      });
+    }
+
+    // Update profile picture
+    user.profilePicture = req.file.path; // Cloudinary URL
+
+    await user.save();
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Profile picture updated successfully',
+      profilePicture: user.profilePicture,
+      user: {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        address: user.address,
+        district: user.district,
+        upazila: user.upazila,
+        nidNumber: user.nidNumber,
+        role: user.role,
+        residentialArea: user.residentialArea,
+        profilePicture: user.profilePicture
+      }
+    });
+
+  } catch (error) {
+    console.error('Upload profile picture error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error uploading profile picture',
+      error: error.message 
+    });
+  }
+};
+

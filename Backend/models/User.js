@@ -45,6 +45,14 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Upazila is required'],
     trim: true
   },
+  residentialArea: {
+    type: String,
+    trim: true
+  },
+  profilePicture: {
+    type: String,
+    default: null
+  },
   role: {
     type: String,
     enum: ['User', 'Police', 'DC'],
@@ -53,6 +61,12 @@ const userSchema = new mongoose.Schema({
   isVerified: {
     type: Boolean,
     default: true
+  },
+  reputation: {
+    type: Number,
+    default: 50,
+    min: 0,
+    max: 100
   }
 }, {
   timestamps: true
