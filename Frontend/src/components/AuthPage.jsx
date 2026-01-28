@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
 const AuthPage = () => {
@@ -10,8 +10,12 @@ const AuthPage = () => {
     password: '',
     nidNumber: '',
     phoneNumber: '',
-    address: ''
+    address: '',
+    district: '',
+    upazila: ''
   });
+  const [districts, setDistricts] = useState([]);
+  const [upazilas, setUpazilas] = useState([]);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [loading, setLoading] = useState(false);
 
@@ -27,6 +31,30 @@ const AuthPage = () => {
       [e.target.name]: e.target.value
     });
   };
+
+  useEffect(() => {
+    if (mode === 'register') {
+      // Fetch districts
+      axios.get('http://localhost:5000/api/locations/districts')
+        .then(res => {
+          if (res.data.success) setDistricts(res.data.districts);
+        })
+        .catch(() => {});
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (formData.district) {
+      axios.get('http://localhost:5000/api/locations/upazilas', { params: { district: formData.district } })
+        .then(res => {
+          if (res.data.success) setUpazilas(res.data.upazilas);
+        })
+        .catch(() => {});
+    } else {
+      setUpazilas([]);
+      setFormData(prev => ({ ...prev, upazila: '' }));
+    }
+  }, [formData.district]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -48,7 +76,9 @@ const AuthPage = () => {
             nidNumber: formData.nidNumber,
             phoneNumber: formData.phoneNumber,
             address: formData.address,
-            role: role
+            role: role,
+            district: formData.district,
+            upazila: formData.upazila
           };
 
       const response = await axios.post(`http://localhost:5000${endpoint}`, payload);
@@ -74,7 +104,9 @@ const AuthPage = () => {
             password: '',
             nidNumber: '',
             phoneNumber: '',
-            address: ''
+            address: '',
+            district: '',
+            upazila: ''
           });
         }
       }
@@ -278,6 +310,43 @@ const AuthPage = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition resize-none"
                     placeholder="Enter your full address"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    District
+                  </label>
+                  <select
+                    name="district"
+                    value={formData.district}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  >
+                    <option value="">Select district</option>
+                    {districts.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Upazila/Thana
+                  </label>
+                  <select
+                    name="upazila"
+                    value={formData.upazila}
+                    onChange={handleInputChange}
+                    required
+                    disabled={!formData.district}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  >
+                    <option value="">{formData.district ? 'Select upazila/thana' : 'Select district first'}</option>
+                    {upazilas.map((u) => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                  </select>
                 </div>
               </>
             )}

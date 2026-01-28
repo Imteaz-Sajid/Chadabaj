@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const authRoutes = require('./routes/authRoutes');
+const locationRoutes = require('./routes/locationRoutes');
 
 const app = express();
 
@@ -25,6 +26,7 @@ mongoose.connect(process.env.MONGODB_URI)
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/locations', locationRoutes);
 
 // Root route
 app.get('/', (req, res) => {
