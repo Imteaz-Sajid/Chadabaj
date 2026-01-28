@@ -35,6 +35,16 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Address is required'],
     trim: true
   },
+  district: {
+    type: String,
+    required: [true, 'District is required'],
+    trim: true
+  },
+  upazila: {
+    type: String,
+    required: [true, 'Upazila is required'],
+    trim: true
+  },
   role: {
     type: String,
     enum: ['User', 'Police', 'DC'],
@@ -76,6 +86,16 @@ const pendingUserSchema = new mongoose.Schema({
     trim: true
   },
   address: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  district: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  upazila: {
     type: String,
     required: true,
     trim: true

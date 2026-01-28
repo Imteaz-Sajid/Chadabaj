@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const { User, PendingUser } = require('../models/User');
+const Location = require('../models/Location');
 
 // Configure nodemailer transporter with Brevo (Sendinblue)
 const transporter = nodemailer.createTransport({
@@ -25,13 +26,21 @@ console.log('   Key:', process.env.SMTP_KEY ? '***' + process.env.SMTP_KEY.slice
 // Register user
 exports.register = async (req, res) => {
   try {
-    const { fullName, email, password, nidNumber, phoneNumber, address, role } = req.body;
+    const { fullName, email, password, nidNumber, phoneNumber, address, role, district, upazila } = req.body;
 
     // Validate input
-    if (!fullName || !email || !password || !nidNumber || !phoneNumber || !address || !role) {
+    if (!fullName || !email || !password || !nidNumber || !phoneNumber || !address || !role || !district || !upazila) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Please provide all required fields: fullName, email, password, NID number, phone number, address, and role' 
+        message: 'Please provide all required fields: fullName, email, password, NID number, phone number, address, role, district, and upazila' 
+      });
+    }
+    // Validate district/upazila against Locations collection
+    const validLocation = await Location.findOne({ district, upazila });
+    if (!validLocation) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid district and upazila combination'
       });
     }
 
@@ -95,6 +104,8 @@ exports.register = async (req, res) => {
       phoneNumber,
       address,
       role,
+      district,
+      upazila,
       verificationToken
     });
 
@@ -207,6 +218,8 @@ exports.verifyEmail = async (req, res) => {
       phoneNumber: pendingUser.phoneNumber,
       address: pendingUser.address,
       role: pendingUser.role,
+      district: pendingUser.district,
+      upazila: pendingUser.upazila,
       isVerified: true
     });
 
