@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import PostCard from './PostCard';
 import Navbar from './Navbar';
@@ -10,23 +10,11 @@ const Feed = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [areaFilter, setAreaFilter] = useState('');
+  const [districtFilter, setDistrictFilter] = useState('');
+  const [availableDistricts, setAvailableDistricts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
 
-  useEffect(() => {
-    // Load current user from localStorage so we know their area for voting rules
-    const stored = localStorage.getItem('user');
-    if (stored) {
-      try {
-        setCurrentUser(JSON.parse(stored));
-      } catch {
-        setCurrentUser(null);
-      }
-    }
-
-    fetchPosts();
-  }, [page, areaFilter]);
-
-  const fetchPosts = async () => {
+  const fetchPosts = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
@@ -41,6 +29,9 @@ const Feed = () => {
       params.append('limit', 10);
       if (areaFilter) {
         params.append('area', areaFilter);
+      }
+      if (districtFilter) {
+        params.append('district', districtFilter);
       }
 
       const response = await axios.get(
@@ -63,7 +54,74 @@ const Feed = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, areaFilter, districtFilter]);
+
+  // Fetch all posts once to extract available districts
+  const fetchAllDistricts = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      // Fetch a large number of posts to get all districts
+      const response = await axios.get(
+        `http://localhost:5000/api/posts?limit=500`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        const fetchedPosts = response.data.posts;
+        
+        // Extract unique districts from posts
+        const districts = new Set();
+        fetchedPosts.forEach(post => {
+          // Check location.district first
+          if (post.location?.district) {
+            districts.add(post.location.district);
+          }
+          // Also check district field directly on post
+          if (post.district) {
+            districts.add(post.district);
+          }
+          // Check author's district
+          if (post.author?.district) {
+            districts.add(post.author.district);
+          }
+        });
+        
+        // Convert to sorted array and filter out empty values
+        const sortedDistricts = [...districts]
+          .filter(d => d && d.trim())
+          .sort((a, b) => a.localeCompare(b));
+        
+        setAvailableDistricts(sortedDistricts);
+      }
+    } catch (err) {
+      console.error('Failed to fetch districts:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Load current user from localStorage so we know their area for voting rules
+    const stored = localStorage.getItem('user');
+    if (stored) {
+      try {
+        setCurrentUser(JSON.parse(stored));
+      } catch {
+        setCurrentUser(null);
+      }
+    }
+
+    // Fetch districts on initial load
+    fetchAllDistricts();
+  }, [fetchAllDistricts]);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   const handleVote = (updatedPost) => {
     // Update the post in the list with the new vote counts
@@ -89,33 +147,123 @@ const Feed = () => {
       <Navbar />
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Crime Feed</h1>
-
-          {/* Area Filter */}
-          <div className="flex gap-3">
-            <input
-              type="text"
-              placeholder="Filter by area..."
-              value={areaFilter}
-              onChange={(e) => {
-                setAreaFilter(e.target.value);
-                setPage(1);
-              }}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            {areaFilter && (
+        <div className="bg-white rounded-2xl shadow-lg p-6 mb-6 border border-gray-100">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Crime Feed</h1>
+              <p className="text-gray-500 text-sm mt-1">Stay informed about incidents in your community</p>
+            </div>
+            {(districtFilter || areaFilter) && (
               <button
                 onClick={() => {
+                  setDistrictFilter('');
                   setAreaFilter('');
                   setPage(1);
                 }}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-all"
               >
-                Clear
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Clear Filters
               </button>
             )}
           </div>
+
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* District Dropdown */}
+            <div className="relative flex-1">
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">District</label>
+              <div className="relative">
+                <select
+                  value={districtFilter}
+                  onChange={(e) => {
+                    setDistrictFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-full appearance-none px-4 py-3 pr-10 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:bg-white transition-all cursor-pointer"
+                >
+                  <option value="">All Districts</option>
+                  {availableDistricts.map(district => (
+                    <option key={district} value={district}>{district}</option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Area Search */}
+            <div className="relative flex-1">
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Area</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search by area name..."
+                  value={areaFilter}
+                  onChange={(e) => {
+                    setAreaFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-full px-4 py-3 pl-11 bg-gray-50 border border-gray-200 rounded-xl text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent focus:bg-white transition-all"
+                />
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+                {areaFilter && (
+                  <button
+                    onClick={() => {
+                      setAreaFilter('');
+                      setPage(1);
+                    }}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Active Filters Pills */}
+          {(districtFilter || areaFilter) && (
+            <div className="flex flex-wrap gap-2 mt-4">
+              {districtFilter && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-full text-sm font-medium">
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                  </svg>
+                  {districtFilter}
+                  <button onClick={() => { setDistrictFilter(''); setPage(1); }} className="ml-1 hover:text-indigo-900">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              )}
+              {areaFilter && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-full text-sm font-medium">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  "{areaFilter}"
+                  <button onClick={() => { setAreaFilter(''); setPage(1); }} className="ml-1 hover:text-purple-900">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Error Message */}

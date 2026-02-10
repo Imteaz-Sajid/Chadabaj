@@ -5,14 +5,33 @@ const { User } = require('../models/User');
 // Create a new post
 exports.createPost = async (req, res) => {
   try {
-    const { caption, area, isAnonymous } = req.body;
+    const { caption, area, isAnonymous, latitude, longitude, lat, lng, address, district, upazila } = req.body;
     const userId = req.user.id; // Assuming middleware sets req.user
 
-    // Validate input
-    if (!caption || !area) {
+    // Use lat/lng if provided, otherwise fall back to latitude/longitude
+    const finalLat = lat || latitude;
+    const finalLng = lng || longitude;
+
+    // Validate input - area can be derived from address if not provided
+    if (!caption) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide caption and area'
+        message: 'Please provide a caption'
+      });
+    }
+
+    // If area is not provided but address is, extract area from address
+    let finalArea = area;
+    if (!finalArea && address) {
+      // Extract area from address (usually the first or second part)
+      const addressParts = address.split(',');
+      finalArea = addressParts[0]?.trim() || 'Unknown Area';
+    }
+
+    if (!finalArea) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide area or select a location on the map'
       });
     }
 
@@ -30,16 +49,71 @@ exports.createPost = async (req, res) => {
     // Normalize anonymous flag (handles boolean and string from form-data)
     const anonymousFlag = isAnonymous === true || isAnonymous === 'true';
 
-    // Create the post
-    const newPost = new Post({
+    // Prepare post data
+    const postData = {
       caption,
       image: imageUrl,
-      area,
+      area: finalArea,
       isAnonymous: anonymousFlag,
       author: userId,
       verifications: [],
       refutations: []
-    });
+    };
+
+    // Add coordinates if provided
+    if (finalLat && finalLng) {
+      const parsedLat = parseFloat(finalLat);
+      const parsedLng = parseFloat(finalLng);
+      
+      // Validate coordinates
+      if (!isNaN(parsedLat) && !isNaN(parsedLng) && parsedLat >= -90 && parsedLat <= 90 && parsedLng >= -180 && parsedLng <= 180) {
+        // Use district from form if provided, otherwise try to extract from address
+        let finalDistrict = district || '';
+        let finalUpazila = upazila || finalArea;
+        let division = '';
+        
+        // If district not provided from form, try to extract from address
+        if (!finalDistrict && address) {
+          const addressParts = address.split(',').map(p => p.trim());
+          // Usually: [place, upazila, district, division, country]
+          if (addressParts.length >= 3) {
+            // District is usually 3rd from end (before division and country)
+            finalDistrict = addressParts[addressParts.length - 3] || '';
+            division = addressParts[addressParts.length - 2] || '';
+            // Clean up "District" suffix if present
+            finalDistrict = finalDistrict.replace(/district$/i, '').replace(/zila$/i, '').trim();
+            division = division.replace(/division$/i, '').trim();
+          }
+        }
+        
+        postData.location = {
+          type: 'Point',
+          coordinates: [parsedLng, parsedLat], // MongoDB stores as [longitude, latitude]
+          lat: parsedLat,
+          lng: parsedLng,
+          address: address || '',
+          thana: finalArea,
+          upazila: finalUpazila,
+          district: finalDistrict,
+          division: division
+        };
+        console.log(`📍 GPS coordinates added: ${parsedLat}, ${parsedLng} for area: ${finalArea}`);
+        console.log(`📍 District: ${finalDistrict}, Upazila: ${finalUpazila}`);
+        if (address) {
+          console.log(`📍 Address: ${address}`);
+        }
+      } else {
+        console.warn(`⚠️ Invalid coordinates provided: ${finalLat}, ${finalLng}`);
+      }
+    }
+    
+    // Also store district at top level if provided (for posts without map coordinates)
+    if (district) {
+      postData.district = district;
+    }
+
+    // Create the post
+    const newPost = new Post(postData);
 
     await newPost.save();
 
@@ -61,7 +135,7 @@ exports.createPost = async (req, res) => {
     }
 
     // Populate author details before sending response
-    await newPost.populate('author', 'fullName email district upazila reputation');
+    await newPost.populate('author', 'fullName email district upazila reputation profilePicture');
 
     res.status(201).json({
       success: true,
@@ -163,7 +237,7 @@ exports.votePost = async (req, res) => {
     await post.save();
 
     // Populate author details with updated reputation
-    await post.populate('author', 'fullName email district upazila reputation');
+    await post.populate('author', 'fullName email district upazila reputation profilePicture');
 
     res.status(200).json({
       success: true,
@@ -193,11 +267,26 @@ exports.getPosts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     const area = req.query.area; // Optional filter by area
+    const district = req.query.district; // Optional filter by district
 
-    const filter = area ? { area } : {};
+    // Build filter object
+    const filter = {};
+    
+    if (area) {
+      // Case-insensitive area search
+      filter.area = { $regex: area, $options: 'i' };
+    }
+    
+    if (district) {
+      // District can be in multiple places: direct field, location.district, or author.district
+      filter.$or = [
+        { district: district },
+        { 'location.district': district }
+      ];
+    }
 
     const posts = await Post.find(filter)
-      .populate('author', 'fullName email district upazila residentialArea reputation')
+      .populate('author', 'fullName email district upazila residentialArea reputation profilePicture')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -225,13 +314,89 @@ exports.getPosts = async (req, res) => {
   }
 };
 
+// Get heatmap statistics data
+exports.getHeatmapData = async (req, res) => {
+  try {
+    console.log('📊 Heatmap endpoint called by user:', req.user?.id);
+    
+    // Aggregate posts by area and count occurrences
+    const areaStats = await Post.aggregate([
+      {
+        $group: {
+          _id: '$area',
+          count: { $sum: 1 },
+          posts: { $push: { _id: '$_id', createdAt: '$createdAt' } }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      },
+      {
+        $project: {
+          _id: 0,
+          area: '$_id',
+          count: 1,
+          posts: 1
+        }
+      }
+    ]);
+
+    // Also aggregate by district for choropleth map
+    const districtStats = await Post.aggregate([
+      {
+        $group: {
+          _id: { $ifNull: ['$district', '$location.district'] },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $match: { _id: { $ne: null, $ne: '' } }
+      },
+      {
+        $sort: { count: -1 }
+      },
+      {
+        $project: {
+          _id: 0,
+          district: '$_id',
+          count: 1
+        }
+      }
+    ]);
+
+    // Get all posts with district and location data
+    const allPosts = await Post.find()
+      .select('area district caption createdAt location')
+      .sort({ createdAt: -1 });
+
+    console.log(`✅ Heatmap data: ${areaStats.length} areas, ${districtStats.length} districts, ${allPosts.length} total posts`);
+    console.log('📊 District stats:', districtStats);
+
+    res.status(200).json({
+      success: true,
+      areaStats,
+      districtStats,
+      totalPosts: allPosts.length,
+      posts: allPosts
+    });
+
+  } catch (error) {
+    console.error('❌ Get heatmap data error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while fetching heatmap data',
+      error: error.message
+    });
+  }
+};
+
 // Get a single post by ID
 exports.getPostById = async (req, res) => {
   try {
     const { postId } = req.params;
 
     const post = await Post.findById(postId)
-      .populate('author', 'fullName email district upazila residentialArea reputation')
+      .populate('author', 'fullName email district upazila residentialArea reputation profilePicture')
       .populate('verifications', 'fullName')
       .populate('refutations', 'fullName');
 

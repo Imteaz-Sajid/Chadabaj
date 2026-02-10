@@ -13,6 +13,9 @@ router.post('/', upload.single('image'), postController.createPost);
 // Get all posts (with optional area filter and pagination)
 router.get('/', postController.getPosts);
 
+// Get heatmap statistics data
+router.get('/heatmap', postController.getHeatmapData);
+
 // Get a specific post by ID
 router.get('/:postId', postController.getPostById);
 

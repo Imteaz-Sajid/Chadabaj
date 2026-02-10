@@ -5,6 +5,7 @@ import EmailVerify from './components/EmailVerify';
 import Feed from './components/Feed';
 import Profile from './components/Profile';
 import Notifications from './components/Notifications';
+import StatsPage from './components/StatsPage';
 import './index.css';
 
 // Protected Route Component
@@ -35,6 +36,11 @@ function App() {
         <Route path="/notifications" element={
           <ProtectedRoute>
             <Notifications />
+          </ProtectedRoute>
+        } />
+        <Route path="/stats" element={
+          <ProtectedRoute>
+            <StatsPage />
           </ProtectedRoute>
         } />
         <Route path="/user-dashboard" element={

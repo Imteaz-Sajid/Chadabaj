@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Navbar from './Navbar';
+import LocationPicker from './LocationPicker';
 
 const Profile = () => {
   const [user, setUser] = useState(null);
@@ -10,11 +11,12 @@ const Profile = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [newPost, setNewPost] = useState({
     caption: '',
-    image: null, // Changed from '' to null for file
+    image: null,
     area: '',
     district: '',
     upazila: '',
-    isAnonymous: false
+    isAnonymous: false,
+    location: { lat: null, lng: null, address: '' }
   });
   const [editData, setEditData] = useState({
     fullName: '',
@@ -114,8 +116,14 @@ const Profile = () => {
   const handleCreatePost = async (e) => {
     e.preventDefault();
     
-    if (!newPost.caption || !newPost.image || !newPost.area) {
-      alert('Please fill in all fields and upload an image');
+    if (!newPost.caption || !newPost.image) {
+      alert('Please fill in all required fields and upload an image');
+      return;
+    }
+
+    // Require either area selection OR map location
+    if (!newPost.area && !newPost.location.lat) {
+      alert('Please select a location - either from dropdown or map');
       return;
     }
 
@@ -126,9 +134,24 @@ const Profile = () => {
       // Create FormData object
       const formData = new FormData();
       formData.append('caption', newPost.caption);
-      formData.append('image', newPost.image); // This is the File object
-      formData.append('area', newPost.area);
+      formData.append('image', newPost.image);
+      formData.append('area', newPost.area || newPost.location.address?.split(',')[0] || 'Unknown');
       formData.append('isAnonymous', newPost.isAnonymous);
+      
+      // Add district and upazila if selected from dropdown
+      if (newPost.district) {
+        formData.append('district', newPost.district);
+      }
+      if (newPost.upazila) {
+        formData.append('upazila', newPost.upazila);
+      }
+      
+      // Add coordinates if provided from map
+      if (newPost.location.lat && newPost.location.lng) {
+        formData.append('lat', newPost.location.lat);
+        formData.append('lng', newPost.location.lng);
+        formData.append('address', newPost.location.address || '');
+      }
 
       const response = await axios.post(
         'http://localhost:5000/api/posts',
@@ -144,7 +167,7 @@ const Profile = () => {
       if (response.data.success) {
         alert(`Post created successfully! ${response.data.notificationsSent} users notified.`);
         setShowCreateModal(false);
-          setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false });
+        setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
         setImagePreview(null);
         fetchMyPosts(); // Refresh posts
       }
@@ -541,7 +564,7 @@ const Profile = () => {
               </button>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {myPosts.map(post => {
                 const authenticity = calculateAuthenticity(post);
                 const totalVotes = (post.verifications?.length || 0) + (post.refutations?.length || 0);
@@ -549,106 +572,100 @@ const Profile = () => {
                 return (
                   <div 
                     key={post._id} 
-                    className="group bg-gradient-to-br from-white to-gray-50 border-2 border-gray-200 rounded-2xl overflow-hidden hover:shadow-2xl hover:border-blue-300 transition-all duration-300"
+                    className="group bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-xl hover:border-indigo-200 transition-all duration-300"
                   >
-                    <div className="flex flex-col md:flex-row gap-6 p-6">
-                      {/* Image Section */}
-                      {post.image && (
-                        <div className="flex-shrink-0 md:w-56">
-                          <div className="relative rounded-xl overflow-hidden shadow-lg group-hover:shadow-xl transition-shadow h-56 md:h-full">
-                            <img 
-                              src={post.image} 
-                              alt="Post" 
-                              className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
-                              onError={(e) => {
-                                e.target.src = 'https://via.placeholder.com/400x300/e2e8f0/64748b?text=Image+Unavailable';
-                              }}
-                            />
-                            <div className="absolute top-3 right-3 bg-black bg-opacity-60 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs font-semibold">
-                              {new Date(post.createdAt).toLocaleDateString()}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Content Section */}
-                      <div className="flex-1 space-y-4">
-                        {/* Caption */}
-                        <p className="text-gray-800 font-medium text-lg leading-relaxed">
-                          {post.caption}
-                        </p>
+                    {/* Image Section - Full Width at Top */}
+                    {post.image && (
+                      <div className="relative h-48 overflow-hidden">
+                        <img 
+                          src={post.image} 
+                          alt="Post" 
+                          className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500"
+                          onError={(e) => {
+                            e.target.src = 'https://via.placeholder.com/400x300/e2e8f0/64748b?text=Image+Unavailable';
+                          }}
+                        />
+                        {/* Gradient Overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                         
-                        {/* Location Badge */}
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center gap-2 bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-semibold text-sm">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            {post.area}
-                          </span>
+                        {/* Date Badge */}
+                        <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-gray-700 px-3 py-1 rounded-full text-xs font-semibold shadow-sm">
+                          {new Date(post.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </div>
                         
-                        {/* Authenticity Bar */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-sm font-semibold">
-                            <span className="text-gray-700">Authenticity Score</span>
-                            <span className={`text-lg ${authenticity >= 70 ? 'text-green-600' : authenticity >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
-                              {authenticity}%
-                            </span>
-                          </div>
-                          <div className="relative h-6 bg-gray-200 rounded-full overflow-hidden shadow-inner">
-                            <div 
-                              className="absolute inset-y-0 left-0 bg-gradient-to-r from-green-500 to-green-600 transition-all duration-500"
-                              style={{ width: `${authenticity}%` }}
-                            ></div>
-                            <div 
-                              className="absolute inset-y-0 right-0 bg-gradient-to-r from-red-500 to-red-600"
-                              style={{ width: `${100 - authenticity}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                        
-                        {/* Vote Stats */}
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="bg-green-50 border-2 border-green-200 rounded-xl p-3 text-center">
-                            <div className="text-2xl font-bold text-green-700">
-                              {post.verifications?.length || 0}
-                            </div>
-                            <div className="text-xs font-semibold text-green-600 mt-1 uppercase tracking-wide">
-                              Verified
-                            </div>
-                          </div>
-                          
-                          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-3 text-center">
-                            <div className="text-2xl font-bold text-red-700">
-                              {post.refutations?.length || 0}
-                            </div>
-                            <div className="text-xs font-semibold text-red-600 mt-1 uppercase tracking-wide">
-                              Refuted
-                            </div>
-                          </div>
-                          
-                          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 text-center">
-                            <div className="text-2xl font-bold text-blue-700">
-                              {totalVotes}
-                            </div>
-                            <div className="text-xs font-semibold text-blue-600 mt-1 uppercase tracking-wide">
-                              Total Votes
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Timestamp */}
-                        <div className="flex items-center gap-2 text-sm text-gray-500">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        {/* Location Overlay */}
+                        <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-white">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
                           </svg>
-                          {new Date(post.createdAt).toLocaleString('en-US', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short'
-                          })}
+                          <span className="text-sm font-medium drop-shadow-lg">{post.area}</span>
                         </div>
+                        
+                        {/* Authenticity Badge */}
+                        <div className={`absolute bottom-3 right-3 px-3 py-1 rounded-full text-xs font-bold shadow-lg ${
+                          authenticity >= 70 ? 'bg-emerald-500 text-white' :
+                          authenticity >= 40 ? 'bg-amber-500 text-white' :
+                          'bg-red-500 text-white'
+                        }`}>
+                          {authenticity}% Authentic
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Content Section */}
+                    <div className="p-5">
+                      {/* Caption */}
+                      <p className="text-gray-800 text-[15px] leading-relaxed line-clamp-3 mb-4">
+                        {post.caption}
+                      </p>
+                      
+                      {/* Stats Row */}
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+                          </svg>
+                          <span className="font-bold text-sm">{post.verifications?.length || 0}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
+                          </svg>
+                          <span className="font-bold text-sm">{post.refutations?.length || 0}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg ml-auto">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                          </svg>
+                          <span className="font-semibold text-sm">{totalVotes}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Authenticity Progress Bar */}
+                      <div className="relative">
+                        <div className="h-1.5 rounded-full overflow-hidden bg-gray-100 flex">
+                          <div 
+                            className="bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+                            style={{ width: `${authenticity}%` }}
+                          />
+                          <div 
+                            className="bg-gradient-to-r from-red-400 to-red-500"
+                            style={{ width: `${100 - authenticity}%` }}
+                          />
+                        </div>
+                      </div>
+                      
+                      {/* Time Ago */}
+                      <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-3">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        {new Date(post.createdAt).toLocaleString('en-US', {
+                          dateStyle: 'medium',
+                          timeStyle: 'short'
+                        })}
                       </div>
                     </div>
                   </div>
@@ -662,9 +679,9 @@ const Profile = () => {
       {/* Create Post Modal - Enhanced */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden transform transition-all animate-scaleIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden transform transition-all animate-scaleIn max-h-[90vh] flex flex-col">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-8 py-6">
+            <div className="bg-gradient-to-r from-blue-600 to-blue-800 px-8 py-6 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <h2 className="text-3xl font-bold text-white flex items-center gap-3">
                   <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -675,7 +692,7 @@ const Profile = () => {
                 <button
                   onClick={() => {
                     setShowCreateModal(false);
-                    setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false });
+                    setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
                     setImagePreview(null);
                   }}
                   className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
@@ -688,8 +705,8 @@ const Profile = () => {
               <p className="text-blue-100 mt-2">Share important incidents with your community</p>
             </div>
             
-            {/* Modal Body */}
-            <form onSubmit={handleCreatePost} className="p-8 space-y-6">
+            {/* Modal Body - Scrollable */}
+            <form onSubmit={handleCreatePost} className="p-8 space-y-6 overflow-y-auto flex-1">
               {/* Caption Field */}
               <div>
                 <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide">
@@ -880,6 +897,26 @@ const Profile = () => {
                 </p>
               </div>
 
+              {/* Location Picker with Map */}
+              <div>
+                <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide flex items-center gap-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Pin Exact Location on Map
+                </label>
+                
+                <LocationPicker
+                  onLocationSelect={({ lat, lng, address }) => {
+                    setNewPost(prev => ({
+                      ...prev,
+                      location: { lat, lng, address }
+                    }));
+                  }}
+                />
+              </div>
+
                 {/* Anonymous Option */}
                 <div className="mt-2 flex items-start gap-3 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">
                   <button
@@ -930,7 +967,7 @@ const Profile = () => {
                   type="button"
                   onClick={() => {
                     setShowCreateModal(false);
-                    setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false });
+                    setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
                     setImagePreview(null);
                   }}
                   disabled={creating}

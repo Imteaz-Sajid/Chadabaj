@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import Leaflet CSS for map styling */
+@import 'leaflet/dist/leaflet.css';
+
+/* Leaflet Map Container Styles */
+.leaflet-container {
+  width: 100%;
+  height: 400px; /* The map MUST have a height */
+  border-radius: 8px;
+  z-index: 1;
+}
+
+/* Custom District Tooltip Styles */
+.district-tooltip {
+  background-color: white !important;
+  border: none !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+  padding: 0 !important;
+}
+
+.district-tooltip .leaflet-tooltip-content {
+  margin: 0;
+}
+
+.leaflet-tooltip-left.district-tooltip::before,
+.leaflet-tooltip-right.district-tooltip::before,
+.leaflet-tooltip-top.district-tooltip::before,
+.leaflet-tooltip-bottom.district-tooltip::before {
+  border-color: transparent !important;
+}
+
 @layer utilities {
   .animate-fadeIn {
     animation: fadeIn 0.3s ease-in-out;

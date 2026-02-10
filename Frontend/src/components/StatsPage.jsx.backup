@@ -1,0 +1,337 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import Navbar from './Navbar';
+
+const StatsPage = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [areaStats, setAreaStats] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [error, setError] = useState('');
+
+  // Test render
+  console.log('StatsPage component rendering...');
+  console.log('State:', { loading, areaStatsLength: areaStats.length, postsLength: posts.length, error });
+
+  const fetchHeatmapData = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found, redirecting to auth');
+        navigate('/auth');
+        return;
+      }
+
+      console.log('Fetching heatmap data...');
+      const response = await axios.get('http://localhost:5000/api/posts/heatmap', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      console.log('Heatmap response:', response.data);
+
+      if (response.data.success) {
+        console.log(`✅ Loaded ${response.data.areaStats.length} areas and ${response.data.posts.length} posts`);
+        setAreaStats(response.data.areaStats);
+        setPosts(response.data.posts);
+      } else {
+        setError('Failed to load statistics: No data available');
+      }
+    } catch (err) {
+      console.error('Error fetching heatmap data:', err);
+      if (err.response?.status === 401) {
+        console.error('Authentication failed, redirecting to login');
+        localStorage.removeItem('token');
+        navigate('/auth');
+      } else {
+        setError(err.response?.data?.message || 'Failed to load statistics');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    fetchHeatmapData();
+  }, [fetchHeatmapData]);
+
+  // Get top 5 crime areas for bar chart
+  const top5Areas = areaStats.slice(0, 5);
+
+  // Color function for bar chart
+  const getBarColor = (count) => {
+    if (count > 10) return '#ef4444'; // Red
+    if (count < 5) return '#fbbf24'; // Yellow
+    return '#3b82f6'; // Blue
+  };
+
+  // Color function for map markers
+  const getMarkerColor = (area) => {
+    const areaData = areaStats.find(stat => stat.area === area);
+    if (!areaData) return '#3b82f6';
+    if (areaData.count > 10) return '#ef4444'; // Red
+    if (areaData.count < 5) return '#fbbf24'; // Yellow
+    return '#f97316'; // Orange (5-10 range)
+  };
+
+  // Generate mock coordinates for areas (since your schema doesn't have lat/lng yet)
+  // In a real implementation, you would store these coordinates in the database
+  const areaCoordinates = {
+    'Dhaka': [23.8103, 90.4125],
+    'Chittagong': [22.3569, 91.7832],
+    'Sylhet': [24.8949, 91.8687],
+    'Rajshahi': [24.3745, 88.6042],
+    'Khulna': [22.8456, 89.5403],
+    'Barisal': [22.7010, 90.3535],
+    'Rangpur': [25.7439, 89.2752],
+    'Mymensingh': [24.7471, 90.4203],
+    'Comilla': [23.4607, 91.1809],
+    'Gazipur': [24.0022, 90.4264]
+  };
+
+  // Get coordinates with fallback to Dhaka center
+  const getCoordinates = (area) => {
+    // Check if the area has predefined coordinates
+    if (areaCoordinates[area]) {
+      return areaCoordinates[area];
+    }
+    // Generate pseudo-random coordinates around Dhaka for unknown areas
+    const baseCoords = [23.8103, 90.4125];
+    const offset = Math.random() * 0.5 - 0.25; // Random offset between -0.25 and 0.25
+    return [baseCoords[0] + offset, baseCoords[1] + offset];
+  };
+
+  // Group posts by area for map display
+  const postsByArea = {};
+  posts.forEach(post => {
+    if (!postsByArea[post.area]) {
+      postsByArea[post.area] = [];
+    }
+    postsByArea[post.area].push(post);
+  });
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100">
+        <Navbar />
+        <div className="flex justify-center items-center h-screen">
+          <div className="text-2xl font-bold text-blue-600">Loading statistics...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-100">
+        <Navbar />
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="bg-red-100 border-2 border-red-400 text-red-700 px-6 py-4 rounded text-lg">
+            ❌ Error: {error}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+      
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Debug Info - Always visible during development */}
+        <div className="mb-6 p-6 bg-blue-50 border-2 border-blue-400 rounded-lg">
+          <p className="font-bold text-xl mb-3 text-blue-800">📊 Debug Information</p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+            <div className="bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600">Loading:</p>
+              <p className="text-lg font-bold">{loading ? 'Yes' : 'No'}</p>
+            </div>
+            <div className="bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600">Error:</p>
+              <p className="text-lg font-bold text-red-600">{error || 'None'}</p>
+            </div>
+            <div className="bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600">Area Stats:</p>
+              <p className="text-lg font-bold text-green-600">{areaStats.length}</p>
+            </div>
+            <div className="bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600">Total Posts:</p>
+              <p className="text-lg font-bold text-green-600">{posts.length}</p>
+            </div>
+            <div className="bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600">Top 5:</p>
+              <p className="text-lg font-bold text-green-600">{top5Areas.length}</p>
+            </div>
+          </div>
+          {areaStats.length > 0 && (
+            <div className="mt-4 bg-white p-3 rounded">
+              <p className="font-semibold text-gray-600 mb-2">Areas:</p>
+              <p className="text-sm">{areaStats.map(s => s.area).join(', ')}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Page Header */}
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl font-bold text-gray-800 mb-3">🔥 Crime Statistics & Heatmap</h1>
+          <p className="text-lg text-gray-600">Visual analysis of crime reports across different areas</p>
+        </div>
+
+        {/* Show message if no data */}
+        {!loading && areaStats.length === 0 && !error && (
+          <div className="bg-yellow-100 border-2 border-yellow-400 text-yellow-800 px-6 py-8 rounded-lg text-center mb-8">
+            <p className="text-2xl font-bold mb-2">📭 No Statistics Available</p>
+            <p className="text-lg">There are currently no crime reports in the database.</p>
+            <p className="mt-2">Posts need to be created to generate statistics.</p>
+          </div>
+        )}
+
+        {/* Section A: Bar Chart - Top 5 High Crime Areas */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">📊 Top 5 High Crime Areas</h2>
+          
+          {top5Areas.length > 0 ? (
+            <ResponsiveContainer width="100%" height={400}>
+              <BarChart data={top5Areas}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey="area" 
+                  angle={-45}
+                  textAnchor="end"
+                  height={100}
+                />
+                <YAxis label={{ value: 'Crime Count', angle: -90, position: 'insideLeft' }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="count" name="Number of Reports" radius={[8, 8, 0, 0]}>
+                  {top5Areas.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={getBarColor(entry.count)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-gray-500 text-center py-8">No data available for chart</p>
+          )}
+
+          {/* Legend for colors */}
+          <div className="flex justify-center gap-6 mt-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-red-500 rounded"></div>
+              <span>High Risk (&gt; 10 reports)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-orange-500 rounded"></div>
+              <span>Medium Risk (5-10 reports)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-yellow-400 rounded"></div>
+              <span>Low Risk (&lt; 5 reports)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Section B: Map - Crime Heatmap */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">🗺️ Crime Heatmap</h2>
+          
+          <div className="h-[500px] rounded-lg overflow-hidden border border-gray-300">
+            <MapContainer 
+              center={[23.8103, 90.4125]} 
+              zoom={7} 
+              style={{ height: '100%', width: '100%' }}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              
+              {/* Render circle markers for each area */}
+              {Object.keys(postsByArea).map((area, index) => {
+                const coords = getCoordinates(area);
+                const areaData = areaStats.find(stat => stat.area === area);
+                const count = areaData ? areaData.count : postsByArea[area].length;
+                
+                // Calculate radius based on crime count
+                const radius = Math.min(10 + count * 2, 50);
+                
+                return (
+                  <CircleMarker
+                    key={index}
+                    center={coords}
+                    radius={radius}
+                    fillColor={getMarkerColor(area)}
+                    color={getMarkerColor(area)}
+                    weight={2}
+                    opacity={0.8}
+                    fillOpacity={0.5}
+                  >
+                    <Popup>
+                      <div className="text-center">
+                        <h3 className="font-bold text-lg">{area}</h3>
+                        <p className="text-gray-700">
+                          <strong>{count}</strong> crime report{count !== 1 ? 's' : ''}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          {count > 10 ? '⚠️ High Risk Area' : count < 5 ? '✅ Low Risk Area' : '⚠️ Medium Risk Area'}
+                        </p>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
+            </MapContainer>
+          </div>
+
+          {/* Map Legend */}
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-2">Map Legend:</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-red-500 opacity-50 border-2 border-red-500"></div>
+                <span><strong>Red Circle:</strong> &gt; 10 reports (High Risk)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-orange-500 opacity-50 border-2 border-orange-500"></div>
+                <span><strong>Orange Circle:</strong> 5-10 reports (Medium Risk)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-yellow-400 opacity-50 border-2 border-yellow-400"></div>
+                <span><strong>Yellow Circle:</strong> &lt; 5 reports (Low Risk)</span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              * Circle size represents the number of crime reports in that area. Click on a circle for details.
+            </p>
+          </div>
+        </div>
+
+        {/* Statistics Summary */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-white rounded-lg shadow-md p-6 text-center">
+            <h3 className="text-4xl font-bold text-blue-600 mb-2">{posts.length}</h3>
+            <p className="text-gray-600">Total Crime Reports</p>
+          </div>
+          <div className="bg-white rounded-lg shadow-md p-6 text-center">
+            <h3 className="text-4xl font-bold text-green-600 mb-2">{areaStats.length}</h3>
+            <p className="text-gray-600">Areas Affected</p>
+          </div>
+          <div className="bg-white rounded-lg shadow-md p-6 text-center">
+            <h3 className="text-4xl font-bold text-red-600 mb-2">
+              {areaStats.filter(stat => stat.count > 10).length}
+            </h3>
+            <p className="text-gray-600">High Risk Areas</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StatsPage;
