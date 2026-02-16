@@ -6,6 +6,7 @@ import Feed from './components/Feed';
 import Profile from './components/Profile';
 import Notifications from './components/Notifications';
 import StatsPage from './components/StatsPage';
+import PostDetail from './components/PostDetail';
 import './index.css';
 
 // Protected Route Component
@@ -41,6 +42,11 @@ function App() {
         <Route path="/stats" element={
           <ProtectedRoute>
             <StatsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/post/:postId" element={
+          <ProtectedRoute>
+            <PostDetail />
           </ProtectedRoute>
         } />
         <Route path="/user-dashboard" element={

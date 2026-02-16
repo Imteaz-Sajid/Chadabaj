@@ -64,9 +64,12 @@ const Notifications = () => {
     if (!notification.isRead) {
       handleMarkAsRead(notification._id);
     }
-    // Navigate to the post
-    if (notification.post) {
-      navigate('/feed');
+    // Navigate to the specific post
+    if (notification.post && notification.post._id) {
+      navigate(`/post/${notification.post._id}`);
+    } else if (notification.post) {
+      // If post is just an ID string (not populated)
+      navigate(`/post/${notification.post}`);
     }
   };
 

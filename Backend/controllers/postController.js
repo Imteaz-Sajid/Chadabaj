@@ -111,6 +111,11 @@ exports.createPost = async (req, res) => {
     if (district) {
       postData.district = district;
     }
+    
+    // Also store thana at top level (use upazila as thana)
+    if (upazila) {
+      postData.thana = upazila;
+    }
 
     // Create the post
     const newPost = new Post(postData);
@@ -417,6 +422,131 @@ exports.getPostById = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error while fetching post',
+      error: error.message
+    });
+  }
+};
+
+// Analyze patterns for serial incident detection
+exports.analyzePattern = async (req, res) => {
+  try {
+    const { district, thana, caption } = req.body;
+
+    // Validate required fields
+    if (!district || !thana) {
+      return res.status(400).json({
+        success: false,
+        message: 'District and Thana are required for pattern analysis'
+      });
+    }
+
+    if (!caption || caption.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: 'Caption must be at least 3 characters for analysis'
+      });
+    }
+
+    console.log(`🔍 Pattern Analysis Request: District=${district}, Thana=${thana}, Caption="${caption.substring(0, 50)}..."`);
+
+    // Calculate date 30 days ago
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Build the query - FLEXIBLE matching
+    // First try to match by thana/area only (most posts have area field)
+    // This is more lenient to catch existing posts without district field
+    const matchingPosts = await Post.find({
+      $and: [
+        {
+          $or: [
+            { thana: { $regex: new RegExp(thana, 'i') } },
+            { area: { $regex: new RegExp(thana, 'i') } },
+            { 'location.thana': { $regex: new RegExp(thana, 'i') } },
+            { 'location.upazila': { $regex: new RegExp(thana, 'i') } },
+            // Also try partial district match for posts without thana
+            { district: { $regex: new RegExp(district, 'i') } },
+            { 'location.district': { $regex: new RegExp(district, 'i') } }
+          ]
+        },
+        { createdAt: { $gte: thirtyDaysAgo } }
+      ]
+    })
+    .populate('author', 'fullName')
+    .sort({ createdAt: -1 })
+    .limit(100); // Increased limit for better coverage
+
+    console.log(`📊 Found ${matchingPosts.length} posts in area matching ${thana}/${district}`);
+
+    // Extract crime-related keywords from caption
+    const crimeKeywords = [
+      'snatch', 'snatching', 'robbery', 'robbed', 'theft', 'stolen', 'steal',
+      'mugging', 'mugged', 'attack', 'attacked', 'assault', 'assaulted',
+      'kidnap', 'kidnapped', 'abduct', 'abducted', 'murder', 'killed',
+      'rape', 'raped', 'harass', 'harassment', 'eve-teasing', 'molest',
+      'fraud', 'scam', 'extortion', 'ransom', 'hijack', 'carjack',
+      'burglary', 'break-in', 'dacoity', 'dacoit', 'loot', 'looted',
+      'pickpocket', 'threat', 'threatened', 'violence', 'vandalism',
+      'accident', 'hit', 'run', 'bike', 'mobile', 'phone', 'bag', 'purse',
+      'ছিনতাই', 'ডাকাতি', 'চুরি', 'হত্যা', 'ধর্ষণ', 'অপহরণ', 'হামলা'
+    ];
+
+    // Extract keywords from user's caption
+    const captionLower = caption.toLowerCase();
+    const captionWords = captionLower.split(/\s+/).filter(w => w.length > 2);
+    const foundKeywords = crimeKeywords.filter(keyword => 
+      captionLower.includes(keyword.toLowerCase())
+    );
+
+    console.log(`🔑 Found keywords in caption: ${foundKeywords.join(', ') || 'none'}`);
+
+    // Filter matching posts by similar keywords OR word overlap
+    const relevantPosts = matchingPosts.filter(post => {
+      const postCaptionLower = post.caption.toLowerCase();
+      
+      // Check if any of the found keywords appear in the existing post
+      const hasMatchingKeyword = foundKeywords.length > 0 && foundKeywords.some(keyword => 
+        postCaptionLower.includes(keyword.toLowerCase())
+      );
+
+      // Also check for general word overlap (at least 1 significant word for more matches)
+      const postWords = postCaptionLower.split(/\s+/);
+      const significantWords = captionWords.filter(word => word.length > 3);
+      const wordOverlap = significantWords.filter(word => 
+        postWords.some(pw => pw.includes(word) || word.includes(pw))
+      ).length;
+
+      // More lenient: match if keyword found OR at least 1 significant word overlap
+      return hasMatchingKeyword || wordOverlap >= 1;
+    });
+
+    console.log(`✅ Relevant posts after filtering: ${relevantPosts.length}`);
+
+    // Format top matches for response
+    const topMatches = relevantPosts.slice(0, 5).map(post => ({
+      _id: post._id,
+      caption: post.caption.substring(0, 100) + (post.caption.length > 100 ? '...' : ''),
+      area: post.area,
+      createdAt: post.createdAt,
+      author: post.isAnonymous ? 'Anonymous' : post.author?.fullName || 'Unknown'
+    }));
+
+    res.status(200).json({
+      success: true,
+      matchCount: relevantPosts.length,
+      totalInArea: matchingPosts.length,
+      keywords: foundKeywords,
+      topMatches,
+      message: relevantPosts.length > 0 
+        ? `Found ${relevantPosts.length} similar incident(s) in ${thana} in the last 30 days`
+        : 'No similar patterns detected'
+    });
+
+  } catch (error) {
+    console.error('Pattern analysis error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during pattern analysis',
       error: error.message
     });
   }

@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Navbar from './Navbar';
 import LocationPicker from './LocationPicker';
 
 const Profile = () => {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [myPosts, setMyPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +33,11 @@ const Profile = () => {
   const [updating, setUpdating] = useState(false);
   const [districts, setDistricts] = useState([]);
   const [upazilas, setUpazilas] = useState([]);
+  
+  // Serial Incident Detection State
+  const [patternAlert, setPatternAlert] = useState(null);
+  const [checkingPattern, setCheckingPattern] = useState(false);
+  const patternCheckTimeout = useRef(null);
 
   useEffect(() => {
     fetchUserData();
@@ -63,6 +70,64 @@ const Profile = () => {
       setNewPost((prev) => ({ ...prev, upazila: '', area: '' }));
     }
   }, [newPost.district]);
+
+  // Serial Incident Detection - Check for patterns when caption changes
+  const checkPatterns = useCallback(async (caption, district, thana) => {
+    if (!district || !thana || !caption || caption.trim().length < 5) {
+      setPatternAlert(null);
+      return;
+    }
+
+    setCheckingPattern(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        'http://localhost:5000/api/posts/analyze-pattern',
+        { district, thana, caption },
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (response.data.success && response.data.matchCount > 0) {
+        setPatternAlert({
+          count: response.data.matchCount,
+          totalInArea: response.data.totalInArea,
+          thana: thana,
+          keywords: response.data.keywords,
+          topMatches: response.data.topMatches
+        });
+      } else {
+        setPatternAlert(null);
+      }
+    } catch (error) {
+      console.error('Pattern check error:', error);
+      setPatternAlert(null);
+    } finally {
+      setCheckingPattern(false);
+    }
+  }, []);
+
+  // Debounced pattern check when caption changes
+  useEffect(() => {
+    // Clear previous timeout
+    if (patternCheckTimeout.current) {
+      clearTimeout(patternCheckTimeout.current);
+    }
+
+    // Only check if district and upazila are selected
+    if (newPost.district && newPost.upazila && newPost.caption.trim().length >= 5) {
+      patternCheckTimeout.current = setTimeout(() => {
+        checkPatterns(newPost.caption, newPost.district, newPost.upazila);
+      }, 1000); // 1 second debounce
+    } else {
+      setPatternAlert(null);
+    }
+
+    return () => {
+      if (patternCheckTimeout.current) {
+        clearTimeout(patternCheckTimeout.current);
+      }
+    };
+  }, [newPost.caption, newPost.district, newPost.upazila, checkPatterns]);
 
   const fetchUserData = async () => {
     try {
@@ -169,6 +234,7 @@ const Profile = () => {
         setShowCreateModal(false);
         setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
         setImagePreview(null);
+        setPatternAlert(null);
         fetchMyPosts(); // Refresh posts
       }
     } catch (err) {
@@ -694,6 +760,7 @@ const Profile = () => {
                     setShowCreateModal(false);
                     setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
                     setImagePreview(null);
+                    setPatternAlert(null);
                   }}
                   className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-colors"
                 >
@@ -707,29 +774,256 @@ const Profile = () => {
             
             {/* Modal Body - Scrollable */}
             <form onSubmit={handleCreatePost} className="p-8 space-y-6 overflow-y-auto flex-1">
-              {/* Caption Field */}
-              <div>
-                <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide">
+              {/* STEP 1: Area Field - District & Upazila/Thana FIRST */}
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                <label className="block text-blue-800 font-bold mb-2 text-sm uppercase tracking-wide flex items-center gap-2">
+                  <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                  Select Incident Location First *
+                </label>
+                <p className="text-xs text-blue-600 mb-3">⚠️ You must select location before writing the description</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* District Dropdown */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      District
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={newPost.district}
+                        onChange={(e) => {
+                          setNewPost({
+                            ...newPost,
+                            district: e.target.value,
+                            upazila: '',
+                            area: '',
+                            caption: '' // Reset caption when location changes
+                          });
+                          setPatternAlert(null);
+                        }}
+                        required
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all text-gray-700 appearance-none bg-white"
+                      >
+                        <option value="">Select district</option>
+                        {districts.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                      <svg
+                        className="w-5 h-5 text-gray-400 absolute right-3 top-3 pointer-events-none"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  {/* Upazila/Thana Dropdown */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Upazila/Thana
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={newPost.upazila}
+                        onChange={(e) => {
+                          const upazila = e.target.value;
+                          setNewPost({
+                            ...newPost,
+                            upazila,
+                            area: upazila
+                          });
+                          setPatternAlert(null);
+                        }}
+                        required
+                        disabled={!newPost.district}
+                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all text-gray-700 appearance-none bg-white disabled:bg-gray-100 disabled:text-gray-500"
+                      >
+                        <option value="">
+                          {newPost.district ? 'Select upazila/thana' : 'Select district first'}
+                        </option>
+                        {upazilas.map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                      </select>
+                      <svg
+                        className="w-5 h-5 text-gray-400 absolute right-3 top-3 pointer-events-none"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                {newPost.district && newPost.upazila && (
+                  <p className="text-xs text-green-600 mt-2 font-semibold flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Location selected: {newPost.upazila}, {newPost.district}
+                  </p>
+                )}
+              </div>
+
+              {/* STEP 2: Caption Field - Only enabled after location selected */}
+              <div className={`transition-opacity duration-300 ${(!newPost.district || !newPost.upazila) ? 'opacity-50' : 'opacity-100'}`}>
+                <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide flex items-center gap-2">
+                  <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">2</span>
                   Incident Description *
                 </label>
                 <textarea
                   value={newPost.caption}
                   onChange={(e) => setNewPost({ ...newPost, caption: e.target.value })}
-                  placeholder="Provide a detailed description of what happened..."
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all resize-none text-gray-700"
+                  placeholder={(!newPost.district || !newPost.upazila) 
+                    ? "Please select district and thana first..." 
+                    : "Provide a detailed description of what happened..."}
+                  className={`w-full px-4 py-3 border-2 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all resize-none text-gray-700 ${
+                    (!newPost.district || !newPost.upazila) 
+                      ? 'border-gray-200 bg-gray-100 cursor-not-allowed' 
+                      : 'border-gray-300 bg-white'
+                  }`}
                   rows="5"
                   maxLength="500"
                   required
+                  disabled={!newPost.district || !newPost.upazila}
                 />
                 <div className="flex justify-between items-center mt-2">
-                  <p className="text-xs text-gray-500">Be clear and specific about the incident</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-500">Be clear and specific about the incident</p>
+                    {checkingPattern && (
+                      <span className="flex items-center gap-1 text-xs text-blue-600">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                        Analyzing...
+                      </span>
+                    )}
+                  </div>
                   <p className={`text-sm font-semibold ${newPost.caption.length > 450 ? 'text-red-600' : 'text-gray-600'}`}>
                     {newPost.caption.length}/500
                   </p>
                 </div>
+
+                {/* Serial Incident Alert */}
+                {patternAlert && (
+                  <div className="mt-4 bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-400 rounded-xl p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                        <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-bold text-amber-800 flex items-center gap-2">
+                          ⚠️ Similar Incidents Found!
+                          <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-bold">
+                            AI Detected
+                          </span>
+                        </h4>
+                        <p className="text-amber-700 text-sm mt-1">
+                          <span className="font-bold text-red-600">{patternAlert.count}</span> similar incident(s) reported in 
+                          <span className="font-semibold"> {patternAlert.thana}</span> recently.
+                        </p>
+                        
+                        {/* Call to Action */}
+                        <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                          <p className="text-blue-800 text-sm font-medium flex items-center gap-2">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Before creating a new post, check if your incident is already reported:
+                          </p>
+                        </div>
+
+                        {patternAlert.keywords && patternAlert.keywords.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            <span className="text-xs text-gray-600">Matching keywords:</span>
+                            {patternAlert.keywords.map((keyword, idx) => (
+                              <span key={idx} className="bg-amber-200 text-amber-800 text-xs px-2 py-0.5 rounded-full font-medium">
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {/* Clickable Similar Posts */}
+                        {patternAlert.topMatches && patternAlert.topMatches.length > 0 && (
+                          <div className="mt-3 border-t border-amber-300 pt-3">
+                            <p className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                              </svg>
+                              Click to view & vote on existing reports:
+                            </p>
+                            <div className="space-y-2 max-h-48 overflow-y-auto">
+                              {patternAlert.topMatches.map((match, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    setShowCreateModal(false);
+                                    setPatternAlert(null);
+                                    navigate(`/post/${match._id}`);
+                                  }}
+                                  className="w-full text-left bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-400 rounded-lg p-3 transition-all duration-200 group"
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex-shrink-0 w-8 h-8 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center">
+                                      <span className="text-sm font-bold text-gray-500 group-hover:text-blue-600">{idx + 1}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-gray-800 text-sm line-clamp-2 group-hover:text-blue-700">
+                                        {match.caption}
+                                      </p>
+                                      <div className="flex items-center gap-3 mt-1.5">
+                                        <span className="text-xs text-gray-500 flex items-center gap-1">
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                          </svg>
+                                          {match.area}
+                                        </span>
+                                        <span className="text-xs text-gray-500 flex items-center gap-1">
+                                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                          </svg>
+                                          {new Date(match.createdAt).toLocaleDateString()}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                          by {match.author}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="flex-shrink-0 text-gray-400 group-hover:text-blue-600">
+                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                      </svg>
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                            
+                            {/* Divider with "or" */}
+                            <div className="flex items-center gap-3 mt-4">
+                              <div className="flex-1 border-t border-gray-300"></div>
+                              <span className="text-xs text-gray-500 font-medium">or continue to create new post</span>
+                              <div className="flex-1 border-t border-gray-300"></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Image Upload Field */}
+              {/* STEP 3: Image Upload Field */}
               <div>
                 <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide">
                   Evidence Image *
@@ -798,114 +1092,16 @@ const Profile = () => {
                 <p className="text-xs text-gray-500 mt-2">Upload a clear image of the incident as evidence</p>
               </div>
 
-              {/* Area Field - District & Upazila/Thana (same as registration) */}
-              <div>
-                <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide">
-                  Incident Location *
-                </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* District Dropdown */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      District
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={newPost.district}
-                        onChange={(e) =>
-                          setNewPost({
-                            ...newPost,
-                            district: e.target.value,
-                            upazila: '',
-                            area: ''
-                          })
-                        }
-                        required
-                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all text-gray-700 appearance-none bg-white"
-                      >
-                        <option value="">Select district</option>
-                        {districts.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                      <svg
-                        className="w-5 h-5 text-gray-400 absolute right-3 top-3 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                    </div>
-                  </div>
-
-                  {/* Upazila/Thana Dropdown */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Upazila/Thana
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={newPost.upazila}
-                        onChange={(e) => {
-                          const upazila = e.target.value;
-                          setNewPost({
-                            ...newPost,
-                            upazila,
-                            // Store selected upazila as the "area" used for notifications
-                            area: upazila
-                          });
-                        }}
-                        required
-                        disabled={!newPost.district}
-                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-200 focus:border-blue-500 transition-all text-gray-700 appearance-none bg-white disabled:bg-gray-100 disabled:text-gray-500"
-                      >
-                        <option value="">
-                          {newPost.district ? 'Select upazila/thana' : 'Select district first'}
-                        </option>
-                        {upazilas.map((u) => (
-                          <option key={u} value={u}>
-                            {u}
-                          </option>
-                        ))}
-                      </select>
-                      <svg
-                        className="w-5 h-5 text-gray-400 absolute right-3 top-3 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  <span className="font-semibold">⚠️ Note:</span> All users in this upazila/thana will receive a notification
-                </p>
-              </div>
-
-              {/* Location Picker with Map */}
+              {/* Location Picker with Map (Optional - for exact pinpoint) */}
               <div>
                 <label className="block text-gray-800 font-bold mb-2 text-sm uppercase tracking-wide flex items-center gap-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
-                  Pin Exact Location on Map
+                  Pin Exact Location on Map (Optional)
                 </label>
+                <p className="text-xs text-gray-500 mb-2">Optionally pin the exact location on the map for more precision</p>
                 
                 <LocationPicker
                   onLocationSelect={({ lat, lng, address }) => {
@@ -969,6 +1165,7 @@ const Profile = () => {
                     setShowCreateModal(false);
                     setNewPost({ caption: '', image: null, area: '', district: '', upazila: '', isAnonymous: false, location: { lat: null, lng: null, address: '' } });
                     setImagePreview(null);
+                    setPatternAlert(null);
                   }}
                   disabled={creating}
                   className="flex-1 bg-gray-200 hover:bg-gray-300 disabled:bg-gray-100 text-gray-800 font-bold py-4 px-6 rounded-xl transition-all duration-300 disabled:cursor-not-allowed"

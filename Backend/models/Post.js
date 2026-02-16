@@ -20,6 +20,10 @@ const postSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  thana: {
+    type: String,
+    trim: true
+  },
   location: {
     type: {
       type: String,
@@ -70,6 +74,8 @@ const postSchema = new mongoose.Schema({
 postSchema.index({ area: 1, createdAt: -1 });
 postSchema.index({ author: 1 });
 postSchema.index({ 'location.coordinates': '2dsphere' }); // Geospatial index for location queries
+postSchema.index({ district: 1, thana: 1, createdAt: -1 }); // Compound index for serial incident detection
+postSchema.index({ caption: 'text' }); // Text index for keyword search
 
 const Post = mongoose.model('Post', postSchema);
 

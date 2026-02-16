@@ -16,6 +16,9 @@ router.get('/', postController.getPosts);
 // Get heatmap statistics data
 router.get('/heatmap', postController.getHeatmapData);
 
+// Analyze patterns for serial incident detection (AI detector)
+router.post('/analyze-pattern', postController.analyzePattern);
+
 // Get a specific post by ID
 router.get('/:postId', postController.getPostById);
 
